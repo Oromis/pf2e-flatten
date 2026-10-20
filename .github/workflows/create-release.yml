@@ -1,0 +1,51 @@
+name: Publish unofficial module release
+
+on:
+  push:
+    branches:
+      - release/unofficial-v14
+
+permissions:
+  contents: write
+
+concurrency:
+  group: unofficial-module-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.repository == 'Oromis/pf2e-flatten'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release automation and source history
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Generate and validate the pinned module package
+        run: node automation/package-release.cjs
+
+      - name: Create module archive
+        working-directory: dist/module
+        run: |
+          version=$(node -p "require('../../release.json').version")
+          zip -r "../pf2e-flatten-v${version}.zip" module.json bundle.js lang LICENSE
+          unzip -t "../pf2e-flatten-v${version}.zip"
+
+      - name: Publish release and install manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=$(node -p "require('./release.json').version")
+          source_commit=$(node -p "require('./release.json').sourceCommit")
+          tag="v${version}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "Release $tag already exists; leaving its published assets unchanged."
+            exit 0
+          fi
+          gh release create "$tag" \
+            "dist/pf2e-flatten-${tag}.zip" dist/module.json \
+            --repo "$GITHUB_REPOSITORY" --target "$source_commit" --latest \
+            --title "PF2e Flatten ${tag} - unofficial v14 compatibility build" \
+            --notes-file dist/release-notes.md
